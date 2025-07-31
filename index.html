@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Galería de Esculturas 3D</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Inter Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            overflow: hidden; /* Prevent scrollbars due to canvas */
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            background-color: #1a202c; /* Dark background for contrast */
+        }
+        /* Flex container for the main content area */
+        .main-content-flex {
+            display: flex;
+            flex-grow: 1; /* Allows it to take available vertical space */
+            position: relative; /* For absolute positioning of loading overlay/modal */
+        }
+        #header-panel {
+            transition: height 0.3s ease-in-out, opacity 0.3s ease-in-out, padding 0.3s ease-in-out;
+        }
+        #header-panel.hidden-header {
+            height: 0;
+            padding: 0;
+            overflow: hidden;
+            opacity: 0;
+            margin-bottom: 0; /* Ensure no residual space */
+        }
+        #info-panel {
+            width: 320px; /* Default width for the info panel */
+            transition: width 0.3s ease-in-out, opacity 0.3s ease-in-out, padding 0.3s ease-in-out;
+            flex-shrink: 0; /* Prevent shrinking when canvas expands */
+            background-color: #2d3748; /* Darker gray background */
+            padding: 1rem; /* Default padding */
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            max-height: 100%; /* Ensure it doesn't overflow vertically */
+            overflow-y: auto; /* Enable scrolling for many models */
+            color: #e2e8f0; /* Light text */
+        }
+        #info-panel.hidden-panel {
+            width: 0;
+            opacity: 0;
+            padding: 0; /* Collapse padding when hidden */
+            overflow: hidden; /* Hide content overflow */
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            flex-grow: 1; /* Allows canvas to take available horizontal space */
+        }
+        /* Custom modal styles */
+        .modal {
+            display: none; /* Hidden by default */
+            position: fixed; /* Stay in place */
+            z-index: 1000; /* Sit on top */
+            left: 0;
+            top: 0;
+            width: 100%; /* Full width */
+            height: 100%; /* Full height */
+            overflow: auto; /* Enable scroll if needed */
+            background-color: rgba(0,0,0,0.7); /* Black w/ opacity */
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-content {
+            background-color: #2d3748; /* Darker gray */
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            max-width: 90%;
+            max-height: 90%;
+            overflow-y: auto;
+            color: #e2e8f0; /* Light text */
+        }
+        .close-button {
+            color: #cbd5e0;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+        }
+        .close-button:hover,
+        .close-button:focus {
+            color: #fff;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        .loading-overlay {
+            display: flex;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.5rem;
+            z-index: 1001;
+            display: none; /* Hidden by default */
+        }
+
+        /* New button to show header */
+        #showHeaderBtn {
+            position: fixed;
+            bottom: 1rem;
+            right: 1rem;
+            background-color: #purple-600; /* Same as hide button */
+            color: white;
+            font-medium py-1.5 px-3 rounded-lg shadow-md
+            transition: opacity 0.3s ease-in-out;
+            z-index: 999; /* Below modals, above canvas */
+            display: none; /* Hidden by default */
+        }
+        #showHeaderBtn:hover {
+            background-color: #purple-700;
+        }
+    </style>
+    <!-- Import Map for Three.js modules to resolve bare specifiers -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.178.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.178.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body class="flex flex-col h-screen bg-gray-900 text-gray-100">
+
+    <!-- Header -->
+    <header id="header-panel" class="bg-gray-800 p-3 shadow-md flex flex-col sm:flex-row items-center justify-between">
+        <h1 class="text-xl font-bold mb-2 sm:mb-0">Galería de Esculturas 3D</h1>
+        <div class="flex items-center space-x-2">
+            <label for="fileInput" class="cursor-pointer bg-blue-600 hover:bg-blue-700 text-white font-medium py-1.5 px-3 rounded-lg shadow-md transition duration-300 ease-in-out">
+                Subir Modelo
+            </label>
+            <input type="file" id="fileInput" accept=".stl,.obj" multiple class="hidden">
+            <button id="clearModelsBtn" class="bg-red-600 hover:bg-red-700 text-white font-medium py-1.5 px-3 rounded-lg shadow-md transition duration-300 ease-in-out">
+                Limpiar Modelos
+            </button>
+            <button id="toggleMenuBtn" class="bg-gray-600 hover:bg-gray-700 text-white font-medium py-1.5 px-3 rounded-lg shadow-md transition duration-300 ease-in-out">
+                Ocultar Panel
+            </button>
+            <button id="toggleHeaderBtn" class="bg-purple-600 hover:bg-purple-700 text-white font-medium py-1.5 px-3 rounded-lg shadow-md transition duration-300 ease-in-out">
+                Ocultar Barra Superior
+            </button>
+        </div>
+    </header>
+
+    <!-- Main content area -->
+    <div class="main-content-flex">
+        <!-- Model Info Panel -->
+        <div id="info-panel" class="bg-gray-800 p-4 rounded-lg shadow-lg">
+            <h2 class="text-lg font-semibold mb-2">Modelos Cargados</h2>
+            <ul id="modelList" class="text-sm">
+                <li class="text-gray-400">Aún no hay modelos cargados.</li>
+            </ul>
+        </div>
+        <canvas id="threeCanvas"></canvas>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay">
+        Cargando modelo...
+    </div>
+
+    <!-- Custom Modal for Messages -->
+    <div id="customModal" class="modal">
+        <div class="modal-content">
+            <span class="close-button" id="closeModalBtn">&times;</span>
+            <p id="modalMessage" class="text-lg"></p>
+        </div>
+    </div>
+
+    <!-- Button to show header when hidden -->
+    <button id="showHeaderBtn" class="bg-purple-600 hover:bg-purple-700 text-white font-medium py-1.5 px-3 rounded-lg shadow-md transition duration-300 ease-in-out">
+        Mostrar Barra Superior
+    </button>
+
+    <script type="module">
+        // Import necessary modules using the import map defined in the HTML head
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+        import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+
+        let scene, camera, renderer, controls;
+        const loadedModels = []; // Array to store all loaded models (THREE.Object3D)
+        const modelInfo = []; // Array to store model metadata (name, original scale, etc.)
+        let selectedModel = null; // Currently selected model
+
+        const fileInput = document.getElementById('fileInput');
+        const modelList = document.getElementById('modelList');
+        const clearModelsBtn = document.getElementById('clearModelsBtn');
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const customModal = document.getElementById('customModal');
+        const closeModalBtn = document.getElementById('closeModalBtn');
+        const modalMessage = document.getElementById('modalMessage');
+        const infoPanel = document.getElementById('info-panel');
+        const toggleMenuBtn = document.getElementById('toggleMenuBtn');
+        const headerPanel = document.getElementById('header-panel'); // Get the header element
+        const toggleHeaderBtn = document.getElementById('toggleHeaderBtn');
+        const showHeaderBtn = document.getElementById('showHeaderBtn'); // New button to show header
+
+        let isMenuHidden = false;
+        let isHeaderHidden = false; // Separate state for header
+
+        // Function to show custom modal
+        function showModal(message) {
+            modalMessage.textContent = message;
+            customModal.style.display = 'flex';
+        }
+
+        // Function to hide custom modal
+        closeModalBtn.onclick = function() {
+            customModal.style.display = 'none';
+        }
+        window.onclick = function(event) {
+            if (event.target == customModal) {
+                customModal.style.display = 'none';
+            }
+        }
+
+        /**
+         * Initializes the Three.js scene, camera, renderer, and controls.
+         * Sets up basic lighting and event listeners for window resizing.
+         */
+        function init() {
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a202c); // Dark background
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 5, 10); // Initial camera position
+
+            // Renderer
+            const canvas = document.getElementById('threeCanvas');
+            renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+
+            // Controls
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true; // Smooth camera movement
+            controls.dampingFactor = 0.25;
+            controls.screenSpacePanning = false; // Keep vertical panning on screen space
+            controls.maxPolarAngle = Math.PI / 2; // Prevent camera from going below ground
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7); // Soft ambient light
+            scene.add(ambientLight);
+
+            const directionalLight1 = new THREE.DirectionalLight(0xffffff, 0.5);
+            directionalLight1.position.set(5, 10, 7.5);
+            scene.add(directionalLight1);
+
+            const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.3);
+            directionalLight2.position.set(-5, -10, -7.5);
+            scene.add(directionalLight2);
+
+            // Add a grid helper for better orientation
+            const gridHelper = new THREE.GridHelper(50, 50, 0xcccccc, 0x888888);
+            scene.add(gridHelper);
+
+            // Event Listeners
+            window.addEventListener('resize', onWindowResize, false);
+            renderer.domElement.addEventListener('click', onCanvasClick, false); // For model selection
+
+            // Toggle Side Menu Button Event Listener
+            toggleMenuBtn.addEventListener('click', () => {
+                isMenuHidden = !isMenuHidden;
+                if (isMenuHidden) {
+                    infoPanel.classList.add('hidden-panel');
+                    toggleMenuBtn.textContent = 'Mostrar Panel';
+                } else {
+                    infoPanel.classList.remove('hidden-panel');
+                    toggleMenuBtn.textContent = 'Ocultar Panel';
+                }
+                // Manually trigger resize to update canvas dimensions after panel toggle
+                onWindowResize();
+            });
+
+            // Toggle Header Button Event Listener
+            toggleHeaderBtn.addEventListener('click', () => {
+                isHeaderHidden = !isHeaderHidden;
+                if (isHeaderHidden) {
+                    headerPanel.classList.add('hidden-header');
+                    toggleHeaderBtn.style.display = 'none'; // Hide the original toggle button
+                    showHeaderBtn.style.display = 'block'; // Show the new button
+                } else {
+                    headerPanel.classList.remove('hidden-header');
+                    toggleHeaderBtn.style.display = 'block'; // Show the original toggle button
+                    showHeaderBtn.style.display = 'none'; // Hide the new button
+                }
+                onWindowResize(); // Adjust canvas size
+            });
+
+            // Event Listener for the new showHeaderBtn
+            showHeaderBtn.addEventListener('click', () => {
+                isHeaderHidden = false; // Set state to not hidden
+                headerPanel.classList.remove('hidden-header'); // Show header
+                toggleHeaderBtn.style.display = 'block'; // Show original toggle button
+                showHeaderBtn.style.display = 'none'; // Hide this button
+                onWindowResize(); // Adjust canvas size
+            });
+        }
+
+        /**
+         * Handles window resizing to update camera aspect ratio and renderer size.
+         */
+        function onWindowResize() {
+            const mainContentFlex = document.querySelector('.main-content-flex');
+            // Recalculate dimensions based on current layout
+            const width = mainContentFlex.clientWidth;
+            const height = mainContentFlex.clientHeight;
+
+            camera.aspect = width / height;
+            camera.updateProjectionMatrix();
+            renderer.setSize(width, height);
+        }
+
+        /**
+         * Animation loop for rendering the scene.
+         */
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update(); // Only required if controls.enableDamping or controls.autoRotate are set to true
+            renderer.render(scene, camera);
+        }
+
+        /**
+         * Handles file input change event to load selected 3D models.
+         * Supports .stl and .obj formats.
+         * @param {Event} event - The file input change event.
+         */
+        fileInput.addEventListener('change', (event) => {
+            const files = event.target.files;
+            if (files.length === 0) return;
+
+            loadingOverlay.style.display = 'flex'; // Show loading overlay
+
+            let loadedCount = 0;
+            const totalFiles = files.length;
+
+            Array.from(files).forEach(file => {
+                const reader = new FileReader();
+
+                reader.onload = (e) => {
+                    console.log(`File "${file.name}" read successfully.`);
+                    try {
+                        let loader;
+                        let mesh;
+
+                        if (file.name.toLowerCase().endsWith('.stl')) {
+                            loader = new STLLoader();
+                            const geometry = loader.parse(e.target.result);
+                            const material = new THREE.MeshPhongMaterial({ color: 0x0077ff, specular: 0x111111, shininess: 200 });
+                            mesh = new THREE.Mesh(geometry, material);
+                            console.log(`STL model "${file.name}" parsed.`);
+                        } else if (file.name.toLowerCase().endsWith('.obj')) {
+                            loader = new OBJLoader();
+                            const object = loader.parse(e.target.result);
+                            object.traverse((child) => {
+                                if (child.isMesh) {
+                                    if (!child.material) {
+                                        child.material = new THREE.MeshPhongMaterial({ color: 0x0077ff, specular: 0x111111, shininess: 200 });
+                                    }
+                                }
+                            });
+                            mesh = object;
+                            console.log(`OBJ model "${file.name}" parsed.`);
+                        } else {
+                            showModal(`Tipo de archivo no compatible: ${file.name}. Por favor, suba archivos .stl o .obj.`);
+                            loadedCount++;
+                            if (loadedCount === totalFiles) {
+                                loadingOverlay.style.display = 'none';
+                            }
+                            return;
+                        }
+
+                        // Calculate bounding box to center and scale the model
+                        const bbox = new THREE.Box3().setFromObject(mesh);
+                        const center = bbox.getCenter(new THREE.Vector3());
+                        const size = bbox.getSize(new THREE.Vector3());
+
+                        // Normalize model size to fit within a reasonable range (e.g., max dimension 5 units)
+                        const maxDim = Math.max(size.x, size.y, size.z);
+                        const scaleFactor = 5 / maxDim; // Scale to fit within a 5x5x5 cube
+                        mesh.scale.set(scaleFactor, scaleFactor, scaleFactor);
+
+                        // Recalculate bounding box after scaling to get scaled dimensions
+                        const scaledBbox = new THREE.Box3().setFromObject(mesh);
+                        const scaledCenter = scaledBbox.getCenter(new THREE.Vector3());
+                        const scaledSize = scaledBbox.getSize(new THREE.Vector3()); // Get scaled size
+
+                        // Position the model to be centered at the origin, then offset for gallery layout
+                        mesh.position.sub(scaledCenter); // Center the model's geometry at its local origin
+
+                        // --- Modified positioning for two rows ---
+                        const modelsPerRow = 4; // Number of models per row
+                        const horizontalSpacing = 8; // Spacing between models in a row
+                        const verticalRowSpacing = 12; // Spacing between rows
+
+                        const numLoaded = loadedModels.length; // Number of models already in the scene
+
+                        const currentRow = Math.floor(numLoaded / modelsPerRow);
+                        const currentCol = numLoaded % modelsPerRow;
+
+                        // Calculate X position: center the models in the current row
+                        mesh.position.x += (currentCol - (modelsPerRow - 1) / 2) * horizontalSpacing;
+
+                        // Calculate Z position: offset for each row
+                        mesh.position.z += currentRow * verticalRowSpacing;
+
+                        // Adjust Y position to be on the grid
+                        mesh.position.y += scaledSize.y / 2;
+                        // --- End modified positioning ---
+
+                        scene.add(mesh);
+                        loadedModels.push(mesh);
+                        modelInfo.push({
+                            name: file.name,
+                            object: mesh,
+                            originalScale: scaleFactor, // Store the initial scale for potential reset
+                            originalPosition: mesh.position.clone() // Store original position
+                        });
+                        updateModelList();
+                        showModal(`¡Modelo "${file.name}" cargado exitosamente!`);
+                        console.log(`Model "${file.name}" added to scene.`);
+
+                    } catch (error) {
+                        console.error('Error loading model:', error);
+                        showModal(`Error al cargar "${file.name}". Error: ${error.message}`);
+                    } finally {
+                        loadedCount++;
+                        if (loadedCount === totalFiles) {
+                            loadingOverlay.style.display = 'none'; // Hide loading overlay when all files are processed
+                            console.log('All files processed. Loading overlay hidden.');
+                        }
+                    }
+                };
+
+                reader.onerror = (error) => {
+                    console.error('FileReader error:', error);
+                    showModal(`Error al leer el archivo "${file.name}".`);
+                    loadedCount++;
+                    if (loadedCount === totalFiles) {
+                        loadingOverlay.style.display = 'none';
+                    }
+                };
+
+                // Read the file as an ArrayBuffer for STL or text for OBJ
+                if (file.name.toLowerCase().endsWith('.stl')) {
+                    reader.readAsArrayBuffer(file);
+                } else if (file.name.toLowerCase().endsWith('.obj')) {
+                    reader.readAsText(file);
+                }
+            });
+            // Clear the input value so the same file can be uploaded again if needed
+            fileInput.value = '';
+        });
+
+        /**
+         * Updates the list of loaded models displayed in the info panel.
+         */
+        function updateModelList() {
+            modelList.innerHTML = ''; // Clear existing list
+            if (modelInfo.length === 0) {
+                modelList.innerHTML = '<li class="text-gray-400">Aún no hay modelos cargados.</li>';
+                return;
+            }
+            modelInfo.forEach((info, index) => {
+                const li = document.createElement('li');
+                li.className = `p-1 rounded-md cursor-pointer hover:bg-gray-700 transition-colors duration-200 ${selectedModel === info.object ? 'bg-blue-700' : ''}`;
+                li.textContent = `${index + 1}. ${info.name}`;
+                li.dataset.modelIndex = index; // Store index for selection
+                modelList.appendChild(li);
+            });
+        }
+
+        /**
+         * Handles clicks on the canvas to select a model.
+         * @param {MouseEvent} event - The click event.
+         */
+        function onCanvasClick(event) {
+            // Calculate mouse position in normalized device coordinates (-1 to +1)
+            const mouse = new THREE.Vector2();
+            // Adjust mouse coordinates if the header is visible
+            const headerHeight = isHeaderHidden ? 0 : headerPanel.offsetHeight;
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -((event.clientY - headerHeight) / (window.innerHeight - headerHeight)) * 2 + 1;
+
+
+            // Create a raycaster and set it from the camera and mouse position
+            const raycaster = new THREE.Raycaster();
+            raycaster.setFromCamera(mouse, camera);
+
+            // Find intersections with all loaded models
+            const intersects = raycaster.intersectObjects(loadedModels, true);
+
+            if (intersects.length > 0) {
+                // Find the top-level object that was clicked
+                let clickedObject = intersects[0].object;
+                while (clickedObject && !loadedModels.includes(clickedObject)) {
+                    clickedObject = clickedObject.parent;
+                }
+
+                if (clickedObject) {
+                    if (selectedModel) {
+                        // Deselect previous model: reset its material or highlight
+                        // For simplicity, we'll just remove the highlight
+                        selectedModel.traverse((child) => {
+                            if (child.isMesh && child.userData.originalMaterial) {
+                                child.material = child.userData.originalMaterial;
+                                delete child.userData.originalMaterial;
+                            }
+                        });
+                    }
+
+                    selectedModel = clickedObject;
+
+                    // Highlight the selected model
+                    selectedModel.traverse((child) => {
+                        if (child.isMesh) {
+                            child.userData.originalMaterial = child.material; // Store original material
+                            child.material = new THREE.MeshPhongMaterial({ color: 0xffff00, emissive: 0x222200, shininess: 200 }); // Yellow highlight
+                        }
+                    });
+
+                    // Update the model list to show selection
+                    updateModelList();
+
+                    // Optional: Move camera to focus on the selected model
+                    const bbox = new THREE.Box3().setFromObject(selectedModel);
+                    const center = bbox.getCenter(new THREE.Vector3());
+                    controls.target.copy(center); // Set orbit controls target to the model's center
+                    controls.update();
+                }
+            } else {
+                // Clicked outside any model, deselect current model
+                if (selectedModel) {
+                    selectedModel.traverse((child) => {
+                        if (child.isMesh && child.userData.originalMaterial) {
+                            child.material = child.userData.originalMaterial;
+                            delete child.userData.originalMaterial;
+                        }
+                    });
+                    selectedModel = null;
+                    updateModelList();
+                }
+            }
+        }
+
+        /**
+         * Clears all loaded models from the scene and resets the gallery.
+         */
+        clearModelsBtn.addEventListener('click', () => {
+            if (loadedModels.length === 0) {
+                showModal("No hay modelos para limpiar.");
+                return;
+            }
+            // Dispose of geometries and materials to free up memory
+            loadedModels.forEach(model => {
+                scene.remove(model);
+                model.traverse((child) => {
+                    if (child.isMesh) {
+                        child.geometry.dispose();
+                        if (Array.isArray(child.material)) {
+                            child.material.forEach(material => material.dispose());
+                        } else {
+                            child.material.dispose();
+                        }
+                    }
+                });
+            });
+            loadedModels.length = 0; // Clear the array
+            modelInfo.length = 0; // Clear model info
+            selectedModel = null;
+            updateModelList();
+            showModal("Todos los modelos eliminados de la galería.");
+            // Reset camera target to origin
+            controls.target.set(0, 0, 0);
+            controls.update();
+        });
+
+        // Initialize and start the animation loop when the window loads
+        window.onload = function() {
+            init();
+            animate();
+            updateModelList(); // Initialize the empty model list
+        };
+    </script>
+</body>
+</html>
