@@ -115,15 +115,35 @@
             position: fixed;
             bottom: 1rem;
             right: 1rem;
-            background-color: #purple-600; /* Same as hide button */
+            background-color: #8B5CF6; /* Tailwind purple-600 */
             color: white;
-            font-medium py-1.5 px-3 rounded-lg shadow-md
+            padding: 0.375rem 0.75rem; /* py-1.5 px-3 */
+            border-radius: 0.5rem; /* rounded-lg */
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); /* shadow-md */
             transition: opacity 0.3s ease-in-out;
             z-index: 999; /* Below modals, above canvas */
             display: none; /* Hidden by default */
+            font-weight: 500; /* font-medium */
         }
         #showHeaderBtn:hover {
-            background-color: #purple-700;
+            background-color: #7C3AED; /* Tailwind purple-700 */
+        }
+        .rotate-btn, .reset-btn {
+            background-color: #4A5568; /* Tailwind gray-700 */
+            color: white;
+            font-size: 0.75rem; /* text-xs */
+            padding: 0.25rem 0.5rem; /* py-0.5 px-1.5 */
+            border-radius: 0.25rem; /* rounded */
+            transition: background-color 0.2s ease-in-out;
+        }
+        .rotate-btn:hover, .reset-btn:hover {
+            background-color: #2D3748; /* Tailwind gray-800 */
+        }
+        .reset-btn {
+            background-color: #3B82F6; /* Tailwind blue-500 */
+        }
+        .reset-btn:hover {
+            background-color: #2563EB; /* Tailwind blue-600 */
         }
     </style>
     <!-- Import Map for Three.js modules to resolve bare specifiers -->
@@ -315,6 +335,21 @@
                 showHeaderBtn.style.display = 'none'; // Hide this button
                 onWindowResize(); // Adjust canvas size
             });
+
+            // Event listener for rotation and reset buttons (delegation)
+            modelList.addEventListener('click', (event) => {
+                const target = event.target;
+                if (target.classList.contains('rotate-btn')) {
+                    const index = parseInt(target.dataset.modelIndex);
+                    const axis = target.dataset.axis;
+                    const modelGroup = loadedModels[index]; // Get the group
+                    rotateModel(modelGroup, axis);
+                } else if (target.classList.contains('reset-btn')) {
+                    const index = parseInt(target.dataset.modelIndex);
+                    const modelGroup = loadedModels[index]; // Get the group
+                    resetModel(modelGroup);
+                }
+            });
         }
 
         /**
@@ -341,6 +376,31 @@
         }
 
         /**
+         * Rotates a given 3D model (or its parent group) around a specified axis.
+         * @param {THREE.Object3D} modelGroup - The THREE.Group containing the 3D object to rotate.
+         * @param {string} axis - The axis to rotate around ('x', 'y', or 'z').
+         */
+        function rotateModel(modelGroup, axis) {
+            const rotationAmount = Math.PI / 8; // Rotate by 22.5 degrees
+            if (axis === 'x') {
+                modelGroup.rotation.x += rotationAmount;
+            } else if (axis === 'y') {
+                modelGroup.rotation.y += rotationAmount;
+            } else if (axis === 'z') {
+                modelGroup.rotation.z += rotationAmount;
+            }
+            // The animate loop will handle re-rendering the scene
+        }
+
+        /**
+         * Resets the rotation of a given 3D model (its parent group) to its initial state.
+         * @param {THREE.Object3D} modelGroup - The THREE.Group containing the 3D object to reset.
+         */
+        function resetModel(modelGroup) {
+            modelGroup.rotation.set(0, 0, 0); // Reset rotation to initial (0,0,0)
+        }
+
+        /**
          * Handles file input change event to load selected 3D models.
          * Supports .stl and .obj formats.
          * @param {Event} event - The file input change event.
@@ -361,25 +421,24 @@
                     console.log(`File "${file.name}" read successfully.`);
                     try {
                         let loader;
-                        let mesh;
+                        let loadedObject; // This will be the mesh or the loaded object from OBJLoader
 
                         if (file.name.toLowerCase().endsWith('.stl')) {
                             loader = new STLLoader();
                             const geometry = loader.parse(e.target.result);
                             const material = new THREE.MeshPhongMaterial({ color: 0x0077ff, specular: 0x111111, shininess: 200 });
-                            mesh = new THREE.Mesh(geometry, material);
+                            loadedObject = new THREE.Mesh(geometry, material);
                             console.log(`STL model "${file.name}" parsed.`);
                         } else if (file.name.toLowerCase().endsWith('.obj')) {
                             loader = new OBJLoader();
-                            const object = loader.parse(e.target.result);
-                            object.traverse((child) => {
+                            loadedObject = loader.parse(e.target.result);
+                            loadedObject.traverse((child) => {
                                 if (child.isMesh) {
                                     if (!child.material) {
                                         child.material = new THREE.MeshPhongMaterial({ color: 0x0077ff, specular: 0x111111, shininess: 200 });
                                     }
                                 }
                             });
-                            mesh = object;
                             console.log(`OBJ model "${file.name}" parsed.`);
                         } else {
                             showModal(`Tipo de archivo no compatible: ${file.name}. Por favor, suba archivos .stl o .obj.`);
@@ -390,25 +449,30 @@
                             return;
                         }
 
-                        // Calculate bounding box to center and scale the model
-                        const bbox = new THREE.Box3().setFromObject(mesh);
+                        // Create a group to hold the model and handle its rotation
+                        const modelGroup = new THREE.Group();
+                        modelGroup.add(loadedObject); // Add the loaded object (mesh or group from OBJ) to this new group
+
+                        // Calculate bounding box of the loaded object to center it within its group
+                        const bbox = new THREE.Box3().setFromObject(loadedObject);
                         const center = bbox.getCenter(new THREE.Vector3());
                         const size = bbox.getSize(new THREE.Vector3());
 
                         // Normalize model size to fit within a reasonable range (e.g., max dimension 5 units)
                         const maxDim = Math.max(size.x, size.y, size.z);
                         const scaleFactor = 5 / maxDim; // Scale to fit within a 5x5x5 cube
-                        mesh.scale.set(scaleFactor, scaleFactor, scaleFactor);
+                        modelGroup.scale.set(scaleFactor, scaleFactor, scaleFactor); // Apply scale to the group
 
                         // Recalculate bounding box after scaling to get scaled dimensions
-                        const scaledBbox = new THREE.Box3().setFromObject(mesh);
+                        // Note: bbox.setFromObject(modelGroup) will give the scaled bbox
+                        const scaledBbox = new THREE.Box3().setFromObject(modelGroup);
                         const scaledCenter = scaledBbox.getCenter(new THREE.Vector3());
                         const scaledSize = scaledBbox.getSize(new THREE.Vector3()); // Get scaled size
 
-                        // Position the model to be centered at the origin, then offset for gallery layout
-                        mesh.position.sub(scaledCenter); // Center the model's geometry at its local origin
+                        // Center the loaded object within its group
+                        loadedObject.position.sub(center); // Subtract original center to move to group's origin
 
-                        // --- Modified positioning for two rows ---
+                        // --- Positioning for two rows ---
                         const modelsPerRow = 4; // Number of models per row
                         const horizontalSpacing = 8; // Spacing between models in a row
                         const verticalRowSpacing = 12; // Spacing between rows
@@ -419,22 +483,23 @@
                         const currentCol = numLoaded % modelsPerRow;
 
                         // Calculate X position: center the models in the current row
-                        mesh.position.x += (currentCol - (modelsPerRow - 1) / 2) * horizontalSpacing;
+                        modelGroup.position.x += (currentCol - (modelsPerRow - 1) / 2) * horizontalSpacing;
 
                         // Calculate Z position: offset for each row
-                        mesh.position.z += currentRow * verticalRowSpacing;
+                        modelGroup.position.z += currentRow * verticalRowSpacing;
 
-                        // Adjust Y position to be on the grid
-                        mesh.position.y += scaledSize.y / 2;
-                        // --- End modified positioning ---
+                        // Adjust Y position of the group to place its base on the grid
+                        modelGroup.position.y += scaledSize.y / 2;
+                        // --- End positioning ---
 
-                        scene.add(mesh);
-                        loadedModels.push(mesh);
+                        scene.add(modelGroup);
+                        loadedModels.push(modelGroup); // Store the group, not the raw loadedObject
                         modelInfo.push({
                             name: file.name,
-                            object: mesh,
-                            originalScale: scaleFactor, // Store the initial scale for potential reset
-                            originalPosition: mesh.position.clone() // Store original position
+                            object: modelGroup, // Store the group
+                            originalScale: scaleFactor,
+                            // Store initial rotation (0,0,0) for the group
+                            initialRotation: new THREE.Euler().copy(modelGroup.rotation)
                         });
                         updateModelList();
                         showModal(`¡Modelo "${file.name}" cargado exitosamente!`);
@@ -484,8 +549,15 @@
             modelInfo.forEach((info, index) => {
                 const li = document.createElement('li');
                 li.className = `p-1 rounded-md cursor-pointer hover:bg-gray-700 transition-colors duration-200 ${selectedModel === info.object ? 'bg-blue-700' : ''}`;
-                li.textContent = `${index + 1}. ${info.name}`;
-                li.dataset.modelIndex = index; // Store index for selection
+                li.innerHTML = `
+                    <span class="block">${index + 1}. ${info.name}</span>
+                    <div class="flex space-x-1 mt-1">
+                        <button data-model-index="${index}" data-axis="x" class="rotate-btn">Rotar X</button>
+                        <button data-model-index="${index}" data-axis="y" class="rotate-btn">Rotar Y</button>
+                        <button data-model-index="${index}" data-axis="z" class="rotate-btn">Rotar Z</button>
+                        <button data-model-index="${index}" class="reset-btn">Reiniciar</button>
+                    </div>
+                `;
                 modelList.appendChild(li);
             });
         }
@@ -511,8 +583,9 @@
             const intersects = raycaster.intersectObjects(loadedModels, true);
 
             if (intersects.length > 0) {
-                // Find the top-level object that was clicked
+                // Find the top-level object that was clicked (which will be the THREE.Group)
                 let clickedObject = intersects[0].object;
+                // Traverse up the parent chain until we find one of the top-level loadedGroups
                 while (clickedObject && !loadedModels.includes(clickedObject)) {
                     clickedObject = clickedObject.parent;
                 }
@@ -520,7 +593,6 @@
                 if (clickedObject) {
                     if (selectedModel) {
                         // Deselect previous model: reset its material or highlight
-                        // For simplicity, we'll just remove the highlight
                         selectedModel.traverse((child) => {
                             if (child.isMesh && child.userData.originalMaterial) {
                                 child.material = child.userData.originalMaterial;
@@ -529,9 +601,9 @@
                         });
                     }
 
-                    selectedModel = clickedObject;
+                    selectedModel = clickedObject; // The selected model is now the group
 
-                    // Highlight the selected model
+                    // Highlight the selected model (the group's children)
                     selectedModel.traverse((child) => {
                         if (child.isMesh) {
                             child.userData.originalMaterial = child.material; // Store original material
@@ -572,9 +644,9 @@
                 return;
             }
             // Dispose of geometries and materials to free up memory
-            loadedModels.forEach(model => {
-                scene.remove(model);
-                model.traverse((child) => {
+            loadedModels.forEach(modelGroup => { // Iterate through the groups
+                scene.remove(modelGroup);
+                modelGroup.traverse((child) => {
                     if (child.isMesh) {
                         child.geometry.dispose();
                         if (Array.isArray(child.material)) {
