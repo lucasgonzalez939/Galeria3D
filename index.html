@@ -128,7 +128,7 @@
         #showHeaderBtn:hover {
             background-color: #7C3AED; /* Tailwind purple-700 */
         }
-        .rotate-btn, .reset-btn {
+        .rotate-btn, .reset-btn, .delete-btn {
             background-color: #4A5568; /* Tailwind gray-700 */
             color: white;
             font-size: 0.75rem; /* text-xs */
@@ -136,7 +136,7 @@
             border-radius: 0.25rem; /* rounded */
             transition: background-color 0.2s ease-in-out;
         }
-        .rotate-btn:hover, .reset-btn:hover {
+        .rotate-btn:hover, .reset-btn:hover, .delete-btn:hover {
             background-color: #2D3748; /* Tailwind gray-800 */
         }
         .reset-btn {
@@ -144,6 +144,20 @@
         }
         .reset-btn:hover {
             background-color: #2563EB; /* Tailwind blue-600 */
+        }
+        .delete-btn {
+            background-color: #EF4444; /* Tailwind red-500 */
+        }
+        .delete-btn:hover {
+            background-color: #DC2626; /* Tailwind red-600 */
+        }
+        .model-name-span {
+            cursor: pointer;
+            display: inline-block; /* Allows padding and margin */
+            padding: 0.25rem 0;
+        }
+        .model-name-span:hover {
+            text-decoration: underline;
         }
     </style>
     <!-- Import Map for Three.js modules to resolve bare specifiers -->
@@ -216,9 +230,9 @@
         import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 
         let scene, camera, renderer, controls;
-        const loadedModels = []; // Array to store all loaded models (THREE.Object3D)
+        const loadedModels = []; // Array to store all loaded models (THREE.Object3D) - these are the THREE.Group objects
         const modelInfo = []; // Array to store model metadata (name, original scale, etc.)
-        let selectedModel = null; // Currently selected model
+        let selectedModel = null; // Currently selected model (THREE.Group)
 
         const fileInput = document.getElementById('fileInput');
         const modelList = document.getElementById('modelList');
@@ -336,18 +350,28 @@
                 onWindowResize(); // Adjust canvas size
             });
 
-            // Event listener for rotation and reset buttons (delegation)
+            // Event listener for rotation, reset, delete buttons and model name click (delegation)
             modelList.addEventListener('click', (event) => {
                 const target = event.target;
+                const index = parseInt(target.dataset.modelIndex); // Get index from button's data attribute
+
+                if (isNaN(index) || index < 0 || index >= loadedModels.length) {
+                    // Clicked on something without a valid model index, or out of bounds
+                    return;
+                }
+
+                const modelGroup = loadedModels[index]; // Get the group
+
                 if (target.classList.contains('rotate-btn')) {
-                    const index = parseInt(target.dataset.modelIndex);
                     const axis = target.dataset.axis;
-                    const modelGroup = loadedModels[index]; // Get the group
                     rotateModel(modelGroup, axis);
                 } else if (target.classList.contains('reset-btn')) {
-                    const index = parseInt(target.dataset.modelIndex);
-                    const modelGroup = loadedModels[index]; // Get the group
                     resetModel(modelGroup);
+                } else if (target.classList.contains('delete-btn')) {
+                    deleteModel(index); // Pass index to delete function
+                } else if (target.classList.contains('model-name-span')) {
+                    // Clicked on the model name span
+                    selectModel(modelGroup);
                 }
             });
         }
@@ -401,6 +425,110 @@
         }
 
         /**
+         * Selects a model, highlights it, and moves the camera to focus on it.
+         * @param {THREE.Object3D} modelObject - The THREE.Group object to select.
+         */
+        function selectModel(modelObject) {
+            if (selectedModel) {
+                // Deselect previous model: reset its material or highlight
+                selectedModel.traverse((child) => {
+                    if (child.isMesh && child.userData.originalMaterial) {
+                        child.material = child.userData.originalMaterial;
+                        delete child.userData.originalMaterial;
+                    }
+                });
+            }
+
+            selectedModel = modelObject; // The selected model is now the group
+
+            // Highlight the selected model (the group's children)
+            selectedModel.traverse((child) => {
+                if (child.isMesh) {
+                    child.userData.originalMaterial = child.material; // Store original material
+                    child.material = new THREE.MeshPhongMaterial({ color: 0xffff00, emissive: 0x222200, shininess: 200 }); // Yellow highlight
+                }
+            });
+
+            // Update the model list to show selection
+            updateModelList();
+
+            // Move camera to focus on the selected model
+            const bbox = new THREE.Box3().setFromObject(selectedModel);
+            const center = bbox.getCenter(new THREE.Vector3());
+            controls.target.copy(center); // Set orbit controls target to the model's center
+            controls.update();
+        }
+
+        /**
+         * Repositions all currently loaded models based on their index in the loadedModels array.
+         * This is called after a model is deleted to maintain the grid layout.
+         */
+        function repositionAllModels() {
+            const modelsPerRow = 4; // Number of models per row
+            const horizontalSpacing = 8; // Spacing between models in a row
+            const verticalRowSpacing = 12; // Spacing between rows
+
+            loadedModels.forEach((modelGroup, index) => {
+                // Recalculate bounding box after scaling to get scaled dimensions
+                const scaledBbox = new THREE.Box3().setFromObject(modelGroup);
+                const scaledCenter = scaledBbox.getCenter(new THREE.Vector3());
+                const scaledSize = scaledBbox.getSize(new THREE.Vector3());
+
+                // Reset position relative to its own center, then apply grid offset
+                modelGroup.position.set(0, 0, 0); // Reset group position
+                modelGroup.children[0].position.sub(scaledCenter); // Re-center the actual mesh within the group
+
+                const currentRow = Math.floor(index / modelsPerRow);
+                const currentCol = index % modelsPerRow;
+
+                modelGroup.position.x += (currentCol - (modelsPerRow - 1) / 2) * horizontalSpacing;
+                modelGroup.position.z += currentRow * verticalRowSpacing;
+                modelGroup.position.y += scaledSize.y / 2; // Lift model so its base is on the grid
+            });
+        }
+
+
+        /**
+         * Deletes a model from the scene and the loadedModels/modelInfo arrays.
+         * @param {number} index - The index of the model to delete.
+         */
+        function deleteModel(index) {
+            if (index < 0 || index >= loadedModels.length) {
+                showModal("Error: Índice de modelo no válido para eliminar.");
+                return;
+            }
+
+            const modelGroupToDelete = loadedModels[index];
+            scene.remove(modelGroupToDelete);
+
+            // Dispose of geometries and materials to free up memory
+            modelGroupToDelete.traverse((child) => {
+                if (child.isMesh) {
+                    child.geometry.dispose();
+                    if (Array.isArray(child.material)) {
+                        child.material.forEach(material => material.dispose());
+                    } else {
+                        child.material.dispose();
+                    }
+                }
+            });
+
+            // Remove from arrays
+            loadedModels.splice(index, 1);
+            modelInfo.splice(index, 1);
+
+            // If the deleted model was selected, deselect it
+            if (selectedModel === modelGroupToDelete) {
+                selectedModel = null;
+            }
+
+            repositionAllModels(); // Reposition remaining models
+            updateModelList(); // Update the displayed list
+            showModal(`Modelo "${modelGroupToDelete.name}" eliminado de la galería.`);
+        }
+
+
+        /**
          * Handles file input change event to load selected 3D models.
          * Supports .stl and .obj formats.
          * @param {Event} event - The file input change event.
@@ -452,6 +580,7 @@
                         // Create a group to hold the model and handle its rotation
                         const modelGroup = new THREE.Group();
                         modelGroup.add(loadedObject); // Add the loaded object (mesh or group from OBJ) to this new group
+                        modelGroup.name = file.name; // Assign name to the group for identification
 
                         // Calculate bounding box of the loaded object to center it within its group
                         const bbox = new THREE.Box3().setFromObject(loadedObject);
@@ -464,7 +593,6 @@
                         modelGroup.scale.set(scaleFactor, scaleFactor, scaleFactor); // Apply scale to the group
 
                         // Recalculate bounding box after scaling to get scaled dimensions
-                        // Note: bbox.setFromObject(modelGroup) will give the scaled bbox
                         const scaledBbox = new THREE.Box3().setFromObject(modelGroup);
                         const scaledCenter = scaledBbox.getCenter(new THREE.Vector3());
                         const scaledSize = scaledBbox.getSize(new THREE.Vector3()); // Get scaled size
@@ -498,8 +626,7 @@
                             name: file.name,
                             object: modelGroup, // Store the group
                             originalScale: scaleFactor,
-                            // Store initial rotation (0,0,0) for the group
-                            initialRotation: new THREE.Euler().copy(modelGroup.rotation)
+                            initialRotation: new THREE.Euler().copy(modelGroup.rotation) // Store initial rotation
                         });
                         updateModelList();
                         showModal(`¡Modelo "${file.name}" cargado exitosamente!`);
@@ -548,14 +675,15 @@
             }
             modelInfo.forEach((info, index) => {
                 const li = document.createElement('li');
-                li.className = `p-1 rounded-md cursor-pointer hover:bg-gray-700 transition-colors duration-200 ${selectedModel === info.object ? 'bg-blue-700' : ''}`;
+                li.className = `p-1 rounded-md transition-colors duration-200 ${selectedModel === info.object ? 'bg-blue-700' : ''}`;
                 li.innerHTML = `
-                    <span class="block">${index + 1}. ${info.name}</span>
+                    <span class="block model-name-span cursor-pointer" data-model-index="${index}">${index + 1}. ${info.name}</span>
                     <div class="flex space-x-1 mt-1">
                         <button data-model-index="${index}" data-axis="x" class="rotate-btn">Rotar X</button>
                         <button data-model-index="${index}" data-axis="y" class="rotate-btn">Rotar Y</button>
                         <button data-model-index="${index}" data-axis="z" class="rotate-btn">Rotar Z</button>
                         <button data-model-index="${index}" class="reset-btn">Reiniciar</button>
+                        <button data-model-index="${index}" class="delete-btn">Eliminar</button>
                     </div>
                 `;
                 modelList.appendChild(li);
@@ -591,34 +719,7 @@
                 }
 
                 if (clickedObject) {
-                    if (selectedModel) {
-                        // Deselect previous model: reset its material or highlight
-                        selectedModel.traverse((child) => {
-                            if (child.isMesh && child.userData.originalMaterial) {
-                                child.material = child.userData.originalMaterial;
-                                delete child.userData.originalMaterial;
-                            }
-                        });
-                    }
-
-                    selectedModel = clickedObject; // The selected model is now the group
-
-                    // Highlight the selected model (the group's children)
-                    selectedModel.traverse((child) => {
-                        if (child.isMesh) {
-                            child.userData.originalMaterial = child.material; // Store original material
-                            child.material = new THREE.MeshPhongMaterial({ color: 0xffff00, emissive: 0x222200, shininess: 200 }); // Yellow highlight
-                        }
-                    });
-
-                    // Update the model list to show selection
-                    updateModelList();
-
-                    // Optional: Move camera to focus on the selected model
-                    const bbox = new THREE.Box3().setFromObject(selectedModel);
-                    const center = bbox.getCenter(new THREE.Vector3());
-                    controls.target.copy(center); // Set orbit controls target to the model's center
-                    controls.update();
+                    selectModel(clickedObject); // Use the new selectModel helper function
                 }
             } else {
                 // Clicked outside any model, deselect current model
