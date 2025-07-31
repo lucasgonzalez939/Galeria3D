@@ -159,6 +159,33 @@
         .model-name-span:hover {
             text-decoration: underline;
         }
+
+        /* Home button styling */
+        #homeBtn {
+            position: fixed;
+            bottom: 1rem;
+            left: 1rem;
+            background-color: #10B981; /* Tailwind emerald-500 */
+            color: white;
+            padding: 0.5rem; /* Square button */
+            border-radius: 9999px; /* Fully rounded */
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: background-color 0.2s ease-in-out;
+            z-index: 999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px; /* Fixed size for icon */
+            height: 40px; /* Fixed size for icon */
+        }
+        #homeBtn:hover {
+            background-color: #059669; /* Tailwind emerald-600 */
+        }
+        #homeBtn svg {
+            width: 24px;
+            height: 24px;
+            fill: currentColor; /* Use button's text color */
+        }
     </style>
     <!-- Import Map for Three.js modules to resolve bare specifiers -->
     <script type="importmap">
@@ -222,6 +249,13 @@
         Mostrar Barra Superior
     </button>
 
+    <!-- Home Button -->
+    <button id="homeBtn" class="bg-emerald-500 hover:bg-emerald-600 text-white py-2 px-2 rounded-full shadow-md transition duration-300 ease-in-out">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>
+        </svg>
+    </button>
+
     <script type="module">
         // Import necessary modules using the import map defined in the HTML head
         import * as THREE from 'three';
@@ -246,6 +280,7 @@
         const headerPanel = document.getElementById('header-panel'); // Get the header element
         const toggleHeaderBtn = document.getElementById('toggleHeaderBtn');
         const showHeaderBtn = document.getElementById('showHeaderBtn'); // New button to show header
+        const homeBtn = document.getElementById('homeBtn'); // Home button
 
         let isMenuHidden = false;
         let isHeaderHidden = false; // Separate state for header
@@ -374,6 +409,9 @@
                     selectModel(modelGroup);
                 }
             });
+
+            // Home button event listener
+            homeBtn.addEventListener('click', resetCameraView);
         }
 
         /**
@@ -457,6 +495,26 @@
             const center = bbox.getCenter(new THREE.Vector3());
             controls.target.copy(center); // Set orbit controls target to the model's center
             controls.update();
+        }
+
+        /**
+         * Resets the camera to its initial position and target.
+         */
+        function resetCameraView() {
+            camera.position.set(0, 5, 10); // Original camera position
+            controls.target.set(0, 0, 0); // Original target (center of the grid)
+            controls.update(); // Apply changes to controls
+            renderer.render(scene, camera); // Re-render the scene
+            if (selectedModel) { // Deselect any currently selected model
+                selectedModel.traverse((child) => {
+                    if (child.isMesh && child.userData.originalMaterial) {
+                        child.material = child.userData.originalMaterial;
+                        delete child.userData.originalMaterial;
+                    }
+                });
+                selectedModel = null;
+                updateModelList();
+            }
         }
 
         /**
